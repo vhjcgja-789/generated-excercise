@@ -15,4 +15,3 @@
 - `launch.json` —— 调试配置：先自动编译，再用 gdb 启动 `bin` 下的 exe（工作目录设为 `bin`，保证找到 `zlgcan.dll` 和 `kerneldlls`）。
 - `c_cpp_properties.json` —— IntelliSense 头文件路径。
 
-
