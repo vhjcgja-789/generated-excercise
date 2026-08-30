@@ -91,7 +91,7 @@ UINT Receive_And_Print(CHANNEL_HANDLE chn)
     }
 
     ZCAN_Receive_Data rx[10] = { 0 };
-    UINT n = ZCAN_Receive(chn, rx, 10, 10);    // 最多取 10 帧，等待 10ms
+    UINT n = ZCAN_Receive(chn, rx, 10, 1000);    // 最多取 10 帧，等待 1000ms
     for (UINT i = 0; i < n; i++) {
         printf("RX ID=0x%X [%d] ", GET_ID(rx[i].frame.can_id), rx[i].frame.can_dlc);
         for (int j = 0; j < rx[i].frame.can_dlc; j++) {
@@ -132,7 +132,7 @@ int main(void)
         Receive_And_Print(chRx);                // 接收并打印
 
         seq++;
-        Sleep(10);
+        Sleep(1000);
     }
 
     // 收尾：复位两个通道，关闭设备
