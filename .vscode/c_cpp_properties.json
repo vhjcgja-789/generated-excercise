@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Win64 (MinGW)",
+            "includePath": [
+                "${workspaceFolder}"
+            ],
+            "defines": [
+                "_WIN32",
+                "_M_X64"
+            ],
+            "compilerPath": "D:/webdownload/x86_64-8.1.0-release-posix-seh-rt_v6-rev0/mingw64/bin/g++.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-gcc-x64"
+        }
+    ],
+    "version": 4
+}

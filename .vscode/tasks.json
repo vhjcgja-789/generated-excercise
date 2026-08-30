@@ -1,0 +1,29 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build (g++ x64)",
+            "type": "shell",
+            "command": "D:/webdownload/x86_64-8.1.0-release-posix-seh-rt_v6-rev0/mingw64/bin/g++.exe",
+            "args": [
+                "-m64",
+                "-std=c++17",
+                "-O2",
+                "-g",
+                "${workspaceFolder}/main.cpp",
+                "${workspaceFolder}/zlgcan_x64.lib",
+                "-o",
+                "${workspaceFolder}/bin/CanSendRecvDemo.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "MinGW g++ 编译 main.cpp 并链接 zlgcan_x64.lib，输出 bin\\CanSendRecvDemo.exe"
+        }
+    ]
+}
