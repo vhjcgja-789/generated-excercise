@@ -3,7 +3,9 @@
         {
             "name": "Win64 (MinGW)",
             "includePath": [
-                "${workspaceFolder}"
+                "${workspaceFolder}",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/third_party/zlg"
             ],
             "defines": [
                 "_WIN32",

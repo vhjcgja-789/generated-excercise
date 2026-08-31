@@ -1,56 +1,85 @@
-# EncoderDemo — USBCAN-II 布瑞特多圈编码器控制
+# EncoderDemo — USBCAN-II 与布瑞特多圈编码器通信
 
-自写 Demo：**USBCAN-II 通道1 与布瑞特多圈 CAN 编码器通信**（原双通道自环收发测试工程改造）。
+## 1. 项目简介
 
-## 功能
+课程设计工程：**USBCAN-II 分析仪（通道 1）与布瑞特多圈 CAN 编码器**通信。
 
-- 通道1 以 **500kbps**（编码器出厂默认波特率）初始化。
-- 启动后依次自动执行：
-  1. **设置编码器 ID = 1**（指令 `0x02`，保持/复位出厂默认地址，可在 `main.cpp` 顶部 `ENC_ID` 修改）；
-  2. **设置当前位置为零点**（指令 `0x06`，启动前请先把编码器轴转到目标零点位置）；
-  3. 之后每 500ms **轮询读取编码器值**（指令 `0x01`）并打印：
-     `编码器值 = N (0xNNNNNNNN)`（32 位无符号，低字节在前）。
-- 所有收发的 CAN 帧都会原样打印（`TX/RX ID=0x01 [len] 数据`），便于观察。
-- 按任意键退出。
+- 控制台程序（`main.cpp`）
+- 上位机（`bindings/pyqt/`）
 
-## 协议摘要（编码器 CAN 协议指南 V2.01，标准数据帧）
 
-数据域格式：`[LEN][设备ID][指令FUNC][数据DATA(低字节在前)]`，`LEN` = 2 + DATA 字节数，标识符 ID = 编码器节点地址。
+## 2. 项目架构
 
-| 指令 | 功能 | 下发 | 应答 |
-|------|------|------|------|
-| 0x02 | 设置 ID | `04 01 02 新ID` | `04 01 02 状态`（0=成功） |
-| 0x06 | 设置当前值为零点 | `04 01 06 00` | `04 01 06 00`（0=成功） |
-| 0x01 | 读取编码器值 | `04 01 01 00` | `07 01 01 v0 v1 v2 v3`（32位小端） |
+三层依赖单向：演示入口 → 编码器协议层 → CAN 传输层 → 厂商 SDK。
 
-## 接线
+```text
+main.cpp / bindings/pyqt      演示入口（控制台 / 上位机，只做展示与转发）
+        │
+        ▼
+src/encoder/                  协议层 enc::Encoder（只依赖 ICanBus 接口，
+        │                      不接触厂商 SDK；组帧/校验/超时/规格表）
+        ▼
+src/can/                      传输层 can::UsbCanBus（PImpl，
+        │                      全工程唯一包含 zlgcan.h 的地方）
+        ▼
+third_party/zlg/ + bin/zlgcan.dll + bin/kerneldlls/    厂商 SDK
+```
 
-- 编码器 `CAN_H / CAN_L` 接 USBCAN-II **通道1**（CAN1 端子）。
-- 总线至少需要一个 **120Ω 终端电阻**（USBCAN-II 板载终端跳线或外接电阻）。
-- 编码器若曾被改过 ID/波特率导致无应答：按指南 6.2.3 恢复出厂（断电，黄线接黑线，上电保持 2 分钟，掉电摘线悬空，重新上电）。
+```text
+main.cpp                      控制台演示入口（唯一允许控制台输出）
+src/can/can_types.h           CanFrame / ReceivedFrame / CanError / ICanBus
+src/can/usbcan_bus.h/.cpp     USBCAN-II 适配（PImpl；全工程唯一包含 zlgcan.h）
+src/encoder/encoder_types.h   地址/命令/模式/配置/错误 + 12 条指令规格表
+src/encoder/encoder.h/.cpp    组帧解析、严格帧校验、简单事务
+src/util/result.h             Result<T,E>
+bindings/c_api.h/.cpp         上位机 C ABI：固定宽度 POD/句柄/错误码，吞异常
+bindings/pyqt/                PyQt5 上位机（ctypes 封装 + 设备线程 + 界面）
+third_party/zlg/              厂商 SDK 头文件与导入库
+bin/                          构建产物与运行库（exe / encoder_core.dll / zlgcan.dll / kerneldlls）
+docs/                         参考手册（USBCAN 手册、编码器协议指南）
+copy_runtime.bat              复制 SDK 运行库到输出目录
+.vscode/                      编译/运行/调试任务
+```
 
-## VSCode (MinGW) 编译运行
+## 3. 环境依赖及安装方法
 
-未装 Visual Studio，但有 **MinGW-w64 g++ 8.1.0（x64）**，工程已配好 `.vscode`：
+| 依赖 | 版本/说明 |
+|------|-----------|
+| MinGW-w64 g++ | 8.1.0 x64（posix-seh） |
+| Python | 3.13 **x64** | 
+| PyQt5 | ≥ 5.15.11 | 
+
+
+## 4. 编译与运行
+
+### 4.1 控制台程序
 
 ```bash
-# 打开项目目录
-cd motor_demo
+# 构建（输出 bin\EncoderDemo.exe；-static 静态链入运行时，免带 MinGW DLL）
+g++ -m64 -std=c++17 -O2 -g -static -I. -Isrc -Ithird_party/zlg main.cpp src/can/usbcan_bus.cpp src/encoder/encoder.cpp third_party/zlg/zlgcan_x64.lib -o bin/EncoderDemo.exe
 
-# 编译（输出 bin\EncoderDemo.exe）
-g++ -m64 -std=c++17 -O2 -g main.cpp zlgcan_x64.lib -o bin/EncoderDemo.exe
+# 复制 SDK 运行库 zlgcan.dll + kerneldlls 到 bin（只需一次）
+.\copy_runtime.bat x64 bin
 
-# 复制运行库 zlgcan.dll + kerneldlls 到 bin（只需一次）
-copy_runtime.bat x64 bin
-
-# 运行（先转好编码器轴到目标零点位置再启动）
+# 运行
 .\bin\EncoderDemo.exe
 ```
 
-> 也可直接按 `Ctrl+Shift+B` 构建（任务 `build (g++ x64)`），`F5` 调试运行。
+或直接用 VSCode 任务：`build encoder demo`（Ctrl+Shift+B）→ `run encoder demo`。
 
-## 验证
+运行现象：设备打开成功 → 设置 ID=1 成功 → 置零点成功 → 每 500ms 打印
+编码器值与角速度 → 按任意键退出。转动编码器轴，值随动、零点处为 0 即正常。
 
-1. 启动后看到 `设置编码器 ID = 1: 成功`、`设置零点(当前位置置0): 成功`。
-2. 转动编码器轴，每 500ms 打印的编码器值随之变化；零点位置的值为 0。
-3. 可用 ZCANPRO 复核：编码器 ID=1、波特率 500K、模式=查询。
+### 4.2 上位机（PyQt5）
+
+```bash
+# 构建核心 DLL（输出 bin\encoder_core.dll，与 zlgcan.dll 同目录）
+g++ -m64 -std=c++17 -O2 -g -static -shared -DENC_BUILD_DLL -I. -Isrc -Ithird_party/zlg bindings/c_api.cpp src/can/usbcan_bus.cpp src/encoder/encoder.cpp third_party/zlg/zlgcan_x64.lib -o bin/encoder_core.dll
+
+# 冒烟测试（无硬件即可，验证 DLL 加载与错误通道）
+python -m bindings.pyqt.smoke_test
+
+# 运行上位机
+python -m bindings.pyqt.main
+```
+

@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build (g++ x64)",
+            "label": "build encoder demo",
             "type": "shell",
             "command": "D:/webdownload/x86_64-8.1.0-release-posix-seh-rt_v6-rev0/mingw64/bin/g++.exe",
             "args": [
@@ -10,8 +10,14 @@
                 "-std=c++17",
                 "-O2",
                 "-g",
+                "-static",
+                "-I.",
+                "-Isrc",
+                "-Ithird_party/zlg",
                 "${workspaceFolder}/main.cpp",
-                "${workspaceFolder}/zlgcan_x64.lib",
+                "${workspaceFolder}/src/can/usbcan_bus.cpp",
+                "${workspaceFolder}/src/encoder/encoder.cpp",
+                "${workspaceFolder}/third_party/zlg/zlgcan_x64.lib",
                 "-o",
                 "${workspaceFolder}/bin/EncoderDemo.exe"
             ],
@@ -23,7 +29,59 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "MinGW g++ 编译 main.cpp 并链接 zlgcan_x64.lib，输出 bin\\EncoderDemo.exe"
+            "detail": "MinGW g++ 多文件编译：main + usbcan_bus + encoder，输出 bin/EncoderDemo.exe"
+        },
+        {
+            "label": "run encoder demo",
+            "type": "shell",
+            "command": "${workspaceFolder}/bin/EncoderDemo.exe",
+            "options": {
+                "cwd": "${workspaceFolder}/bin"
+            },
+            "problemMatcher": [],
+            "detail": "运行 bin/EncoderDemo.exe（bin 内需有 zlgcan.dll 与 kerneldlls 运行库）"
+        },
+        {
+            "label": "build encoder core dll",
+            "type": "shell",
+            "command": "D:/webdownload/x86_64-8.1.0-release-posix-seh-rt_v6-rev0/mingw64/bin/g++.exe",
+            "args": [
+                "-m64",
+                "-std=c++17",
+                "-O2",
+                "-g",
+                "-static",
+                "-shared",
+                "-DENC_BUILD_DLL",
+                "-I.",
+                "-Isrc",
+                "-Ithird_party/zlg",
+                "${workspaceFolder}/bindings/c_api.cpp",
+                "${workspaceFolder}/src/can/usbcan_bus.cpp",
+                "${workspaceFolder}/src/encoder/encoder.cpp",
+                "${workspaceFolder}/third_party/zlg/zlgcan_x64.lib",
+                "-o",
+                "${workspaceFolder}/bin/encoder_core.dll"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "构建上位机核心 DLL（C ABI 导出 12 条指令），输出 bin/encoder_core.dll"
+        },
+        {
+            "label": "run encoder gui",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "bindings.pyqt.main"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "detail": "运行 PyQt5 上位机（需先构建 encoder_core.dll，且 pip install PyQt5）"
         }
     ]
 }
