@@ -13,7 +13,7 @@
                 "${workspaceFolder}/main.cpp",
                 "${workspaceFolder}/zlgcan_x64.lib",
                 "-o",
-                "${workspaceFolder}/bin/CanSendRecvDemo.exe"
+                "${workspaceFolder}/bin/EncoderDemo.exe"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
@@ -23,7 +23,7 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "MinGW g++ 编译 main.cpp 并链接 zlgcan_x64.lib，输出 bin\\CanSendRecvDemo.exe"
+            "detail": "MinGW g++ 编译 main.cpp 并链接 zlgcan_x64.lib，输出 bin\\EncoderDemo.exe"
         }
     ]
 }

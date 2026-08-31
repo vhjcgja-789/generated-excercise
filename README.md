@@ -1,28 +1,56 @@
-# CanSendRecvDemo — USBCAN-II 双通道收发测试
+# EncoderDemo — USBCAN-II 布瑞特多圈编码器控制
 
-自写 Demo：**通道 0 发送、通道 1 接收**的最小示例。
-- 单线程循环：每 10ms 发送一帧 CAN 报文（ID=0x123，标准帧，8 字节，`data[0]` 递增），同一循环里轮询接收并打印 `RX ID=... [长度] 数据`，按任意键退出。
-- 二次开发：根据需要修改 `main.cpp`，添加其他功能，如发送自定义 CAN 报文、接收自定义 CAN 报文等。
-- 接口函数库：`zlgcan_x64.lib`（x64），`zlgcan.lib`（x86）。
-- 接口函数头文件：`zlgcan.h`。
+自写 Demo：**USBCAN-II 通道1 与布瑞特多圈 CAN 编码器通信**（原双通道自环收发测试工程改造）。
 
-> 工程默认按 **Win32 (x86)** 配置。若编译 x64，需把 `zlgcan.lib` 换成
-> `zlgcan(20260414)\zlgcan_x64\zlgcan.lib`，并执行 `copy_runtime.bat x64 [Debug|Release]`。
+## 功能
 
+- 通道1 以 **500kbps**（编码器出厂默认波特率）初始化。
+- 启动后依次自动执行：
+  1. **设置编码器 ID = 1**（指令 `0x02`，保持/复位出厂默认地址，可在 `main.cpp` 顶部 `ENC_ID` 修改）；
+  2. **设置当前位置为零点**（指令 `0x06`，启动前请先把编码器轴转到目标零点位置）；
+  3. 之后每 500ms **轮询读取编码器值**（指令 `0x01`）并打印：
+     `编码器值 = N (0xNNNNNNNN)`（32 位无符号，低字节在前）。
+- 所有收发的 CAN 帧都会原样打印（`TX/RX ID=0x01 [len] 数据`），便于观察。
+- 按任意键退出。
+
+## 协议摘要（编码器 CAN 协议指南 V2.01，标准数据帧）
+
+数据域格式：`[LEN][设备ID][指令FUNC][数据DATA(低字节在前)]`，`LEN` = 2 + DATA 字节数，标识符 ID = 编码器节点地址。
+
+| 指令 | 功能 | 下发 | 应答 |
+|------|------|------|------|
+| 0x02 | 设置 ID | `04 01 02 新ID` | `04 01 02 状态`（0=成功） |
+| 0x06 | 设置当前值为零点 | `04 01 06 00` | `04 01 06 00`（0=成功） |
+| 0x01 | 读取编码器值 | `04 01 01 00` | `07 01 01 v0 v1 v2 v3`（32位小端） |
+
+## 接线
+
+- 编码器 `CAN_H / CAN_L` 接 USBCAN-II **通道1**（CAN1 端子）。
+- 总线至少需要一个 **120Ω 终端电阻**（USBCAN-II 板载终端跳线或外接电阻）。
+- 编码器若曾被改过 ID/波特率导致无应答：按指南 6.2.3 恢复出厂（断电，黄线接黑线，上电保持 2 分钟，掉电摘线悬空，重新上电）。
 
 ## VSCode (MinGW) 编译运行
 
 未装 Visual Studio，但有 **MinGW-w64 g++ 8.1.0（x64）**，工程已配好 `.vscode`：
 
-- `tasks.json` —— 编译任务 `build (g++ x64)`：g++ 编译 `main.cpp` 并链接 `zlgcan_x64.lib`，输出 `bin\CanSendRecvDemo.exe`
 ```bash
 # 打开项目目录
-cd CanSendRecvDemo
+cd motor_demo
 
-# 编译
-g++ -o bin/CanSendRecvDemo.exe main.cpp -lgcan_x64 -Lzlgcan(20260414)\zlgcan_x64
+# 编译（输出 bin\EncoderDemo.exe）
+g++ -m64 -std=c++17 -O2 -g main.cpp zlgcan_x64.lib -o bin/EncoderDemo.exe
 
-# 运行
-.\bin\CanSendRecvDemo.exe
+# 复制运行库 zlgcan.dll + kerneldlls 到 bin（只需一次）
+copy_runtime.bat x64 bin
+
+# 运行（先转好编码器轴到目标零点位置再启动）
+.\bin\EncoderDemo.exe
 ```
 
+> 也可直接按 `Ctrl+Shift+B` 构建（任务 `build (g++ x64)`），`F5` 调试运行。
+
+## 验证
+
+1. 启动后看到 `设置编码器 ID = 1: 成功`、`设置零点(当前位置置0): 成功`。
+2. 转动编码器轴，每 500ms 打印的编码器值随之变化；零点位置的值为 0。
+3. 可用 ZCANPRO 复核：编码器 ID=1、波特率 500K、模式=查询。

@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "运行 CanSendRecvDemo (gdb)",
+            "name": "运行 EncoderDemo (gdb)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/CanSendRecvDemo.exe",
+            "program": "${workspaceFolder}/bin/EncoderDemo.exe",
             "args": [],
             "cwd": "${workspaceFolder}/bin",
             "environment": [],

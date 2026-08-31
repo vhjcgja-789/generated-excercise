@@ -1,31 +1,44 @@
 @echo off
 rem ============================================================
-rem  copy_runtime.bat [x86|x64] [Debug|Release]
-rem  将 zlgcan(20260414) 中对应架构的 zlgcan.dll 与 kerneldlls
-rem  复制到本工程输出目录（默认 x86 / Debug）
-rem  用法:
+rem  copy_runtime.bat [x86|x64] [Debug|Release|bin]
+rem  Copy zlgcan.dll + kerneldlls of the given arch from the SDK
+rem  folder to this project's output folder (default x86 / Debug).
+rem  Usage:
 rem    copy_runtime.bat          -> x86  -> Debug
 rem    copy_runtime.bat x64      -> x64  -> Debug
+rem    copy_runtime.bat x64 bin  -> x64  -> bin (VSCode/MinGW output)
 rem    copy_runtime.bat x86 Release
 rem ============================================================
-setlocal
+rem NOTE: the SDK folder name contains parentheses "(20260414)".
+rem Never expand a path containing parentheses inside an if-block at
+rem parse time with %VAR% -- cmd re-scans the block for "(" and breaks.
+rem Use delayed expansion (!VAR!) here, which expands at run time.
+setlocal EnableDelayedExpansion
 set ARCH=%1
 if "%ARCH%"=="" set ARCH=x86
 set CFG=%2
 if "%CFG%"=="" set CFG=Debug
 
-set SRC=%~dp0..\zlgcan(20260414)\zlgcan_%ARCH%
-set DST=%~dp0%CFG%
+set "SDK=%~dp0..\zlgcan(20260414)\zlgcan_%ARCH%"
 
-if not exist "%SRC%\zlgcan.dll" (
-    echo [错误] 未找到 SDK 目录: %SRC%
+if /i "%CFG%"=="bin" (set "DST=%~dp0bin") else (set "DST=%~dp0%CFG%")
+
+call :check_dir "%SDK%"
+if errorlevel 1 (
+    echo [ERROR] SDK folder not found: !SDK!
     exit /b 1
 )
+
 if not exist "%DST%" mkdir "%DST%"
 
-copy /Y "%SRC%\zlgcan.dll" "%DST%\" >nul
+copy /Y "%SDK%\zlgcan.dll" "%DST%\" >nul
 if not exist "%DST%\kerneldlls" mkdir "%DST%\kerneldlls"
-xcopy /E /I /Y "%SRC%\kerneldlls\*" "%DST%\kerneldlls\" >nul
+xcopy /E /I /Y "%SDK%\kerneldlls\*" "%DST%\kerneldlls\" >nul
 
-echo [完成] 已复制 %ARCH% 运行库(zlgcan.dll + kerneldlls) 到 %DST%
+echo [DONE] Copied %ARCH% runtime (zlgcan.dll + kerneldlls) to %DST%
 endlocal
+exit /b 0
+
+:check_dir
+if exist "%~1\zlgcan.dll" exit /b 0
+exit /b 1

@@ -1,9 +1,19 @@
 //=============================================================================
-// main.cpp  ——  USBCAN-II 最小示例：通道0发送 -> 通道1接收
-// 接口调用顺序：OpenDevice -> Init_Channel(通道0/1)
-//               -> 循环(Construct -> Send -> Receive) -> ResetCAN -> CloseDevice
+// main.cpp  ——  USBCAN-II 编码器控制（布瑞特多圈 CAN 编码器）
+// 硬件连接：编码器 CAN_H/CAN_L 接 USBCAN-II 通道1（CAN1），总线需 120Ω 终端电阻
+// 接口调用顺序：OpenDevice -> Init_Channel(通道1, 500kbps)
+//               -> 设置ID(0x02) -> 设置零点(0x06)
+//               -> 循环(读编码器值 0x01 -> 打印) -> ResetCAN -> CloseDevice
 //
-// 运行库：zlgcan.dll + kerneldlls 与 exe 同目录；工程链接 zlgcan.lib（x64 用 zlgcan_x64.lib）
+// 协议（编码器 CAN 协议指南 V2.01，标准数据帧）：
+//   标识符 ID = 编码器节点地址（默认 1）
+//   数据域   = [LEN][设备ID][指令FUNC][数据DATA(低字节在前)]，LEN=2+DATA字节数
+//   0x02 设置ID    : 发 [0x04][id][0x02][新ID]       -> 收 [0x04][id][0x02][状态]
+//   0x06 设零点    : 发 [0x04][id][0x06][0x00]       -> 收 [0x04][id][0x06][状态]
+//   0x01 读编码器值: 发 [0x04][id][0x01][0x00]       -> 收 [0x07][id][0x01][v0][v1][v2][v3]
+//   状态 0 = 成功，非 0 = 错误码
+//
+// 运行库：zlgcan.dll + kerneldlls 与 exe 同目录；工程链接 zlgcan_x64.lib
 //=============================================================================
 #include <windows.h>
 #include <conio.h>
@@ -13,40 +23,45 @@
 #include "zlgcan.h"
 
 //-----------------------------------------------------------------------------
-// 1.构造帧：组装一条标准数据帧（8 字节，首字节从 seq 开始递增）
-//   can_data : 待填充的发送结构体（引用方式传出）
-//   id       : 报文 ID（标准帧 11 位）
-//   seq      : 序列号，数据首字节 = seq，便于观察收发连续性
+// 编码器配置（如需修改编码器 ID / 波特率，只改这里即可）
 //-----------------------------------------------------------------------------
-void Construct_CAN_Frame(ZCAN_Transmit_Data& can_data, canid_t id, int seq)
-{
-    memset(&can_data, 0, sizeof(can_data));
-    can_data.frame.can_id  = MAKE_CAN_ID(id, 0, 0, 0);  // 标准数据帧：非扩展、非远程、非错误帧
-    can_data.frame.can_dlc = 8;                          // 数据长度
-    can_data.transmit_type = 0;                          // 0 = 正常发送
+#define ENC_ID    1                // 编码器节点地址（标识符 ID），默认 1，范围 1~255
+#define ENC_BAUD  "500000"         // CAN 波特率（编码器出厂默认 500kbps）
 
-    for (int i = 0; i < 8; ++i) {
-        can_data.frame.data[i] = (BYTE)(seq + i);        // 填充数据：seq, seq+1, ...
+//-----------------------------------------------------------------------------
+// 构造一帧编码器指令：
+//   ID = ENC_ID，数据域 = [LEN][ENC_ID][func][payload...]，LEN = 2 + plen
+//   payload 多字节时低字节在前
+//-----------------------------------------------------------------------------
+void Build_Encoder_Frame(ZCAN_Transmit_Data& tx, BYTE func, const BYTE* payload, int plen)
+{
+    memset(&tx, 0, sizeof(tx));
+    tx.frame.can_id  = MAKE_CAN_ID(ENC_ID, 0, 0, 0);  // 标准数据帧：非扩展、非远程
+    tx.frame.can_dlc = (BYTE)(2 + plen);               // DLC = LEN 字节数
+    tx.transmit_type = 0;                              // 0 = 正常发送
+
+    tx.frame.data[0] = (BYTE)(2 + plen);               // LEN：含自身、设备ID、FUNC、DATA
+    tx.frame.data[1] = ENC_ID;                         // 设备 ID（编码器地址）
+    tx.frame.data[2] = func;                           // 指令 FUNC
+    for (int i = 0; i < plen && i < 4; ++i) {
+        tx.frame.data[3 + i] = payload[i];             // 数据 DATA（低字节在前）
     }
 }
 
 //-----------------------------------------------------------------------------
-// 2.初始化通道：设波特率（必须在 InitCAN 之前）-> InitCAN -> StartCAN
-//   返回通道句柄；任一环节失败则打印原因并返回 INVALID_CHANNEL_HANDLE
+// 初始化通道：设波特率 -> InitCAN（正常模式，全收）-> StartCAN
 //-----------------------------------------------------------------------------
 CHANNEL_HANDLE Init_Channel(DEVICE_HANDLE dev, int chn_idx)
 {
-    // 设置波特率：属性路径形如 "0/baud_rate"、"1/baud_rate"
     char path[24] = { 0 };
     snprintf(path, sizeof(path), "%d/baud_rate", chn_idx);
-    if (ZCAN_SetValue(dev, path, "500000") != STATUS_OK) {
+    if (ZCAN_SetValue(dev, path, ENC_BAUD) != STATUS_OK) {
         printf("设置通道%d波特率失败\n", chn_idx);
     }
 
-    // 通道初始化配置：正常模式、全收（acc_mask 全 1 = 不屏蔽任何位）
     ZCAN_CHANNEL_INIT_CONFIG cfg = { 0 };
-    cfg.can_type     = TYPE_CAN;      // 0 = 经典 CAN
-    cfg.can.mode     = 0;             // 0 = 正常模式，1 = 只听模式
+    cfg.can_type     = TYPE_CAN;      // 经典 CAN
+    cfg.can.mode     = 0;             // 正常模式
     cfg.can.acc_code = 0;             // 验收码
     cfg.can.acc_mask = 0xffffffff;    // 屏蔽码全 1 = 接收全部报文
 
@@ -60,38 +75,20 @@ CHANNEL_HANDLE Init_Channel(DEVICE_HANDLE dev, int chn_idx)
         printf("启动通道%d失败\n", chn_idx);
         return nullptr;
     }
-
     return chn;
 }
 
 //-----------------------------------------------------------------------------
-// 3.发送：向指定通道发送一帧，返回实际发送成功的帧数（1=成功，0=失败）
-//   失败提示只在第一次失败时打印，避免未接线时每 10ms 刷屏
+// 接收并原样打印所有收到的帧（便于观察总线上的全部报文）
 //-----------------------------------------------------------------------------
-UINT Send_Frame(CHANNEL_HANDLE chn, ZCAN_Transmit_Data* frame)
+void Receive_And_Print(CHANNEL_HANDLE chn)
 {
-    UINT n = ZCAN_Transmit(chn, frame, 1);
-
-    static int warned = 0;             
-    if (n != 1 && !warned) {
-        warned = 1;
-        printf("发送失败\n");
-    }
-    return n;
-}
-
-//-----------------------------------------------------------------------------
-// 4.接收：先查可读帧数，再批量取走并打印，返回本次收到的帧数
-//-----------------------------------------------------------------------------
-UINT Receive_And_Print(CHANNEL_HANDLE chn)
-{
-    // 先查后取：type = TYPE_CAN 表示查询 CAN 帧
     if (ZCAN_GetReceiveNum(chn, TYPE_CAN) == 0) {
-        return 0;
+        return;
     }
 
     ZCAN_Receive_Data rx[10] = { 0 };
-    UINT n = ZCAN_Receive(chn, rx, 10, 1000);    // 最多取 10 帧，等待 1000ms
+    UINT n = ZCAN_Receive(chn, rx, 10, 1000);
     for (UINT i = 0; i < n; i++) {
         printf("RX ID=0x%X [%d] ", GET_ID(rx[i].frame.can_id), rx[i].frame.can_dlc);
         for (int j = 0; j < rx[i].frame.can_dlc; j++) {
@@ -99,9 +96,93 @@ UINT Receive_And_Print(CHANNEL_HANDLE chn)
         }
         printf("\n");
     }
-    return n;
 }
 
+//-----------------------------------------------------------------------------
+// 发送一帧编码器指令，并在 timeout 毫秒内等待对应应答
+// （应答判据：data[1]==ENC_ID 且 data[2]==func）
+// 返回：应答状态字节 data[3]（0=成功，非0=错误码）；超时返回 -1
+//-----------------------------------------------------------------------------
+int Send_And_Wait_Resp(CHANNEL_HANDLE chn, BYTE func, const BYTE* payload, int plen, DWORD timeout)
+{
+    ZCAN_Transmit_Data tx;
+    Build_Encoder_Frame(tx, func, payload, plen);
+    if (ZCAN_Transmit(chn, &tx, 1) != 1) {
+        printf("发送指令 0x%02X 失败\n", func);
+        return -1;
+    }
+    printf("TX ID=0x%X [%d] ", GET_ID(tx.frame.can_id), tx.frame.can_dlc);
+    for (int j = 0; j < tx.frame.can_dlc; j++) {
+        printf("%02X ", tx.frame.data[j]);
+    }
+    printf("\n");
+
+    DWORD t0 = GetTickCount();
+    while (GetTickCount() - t0 < timeout) {
+        if (ZCAN_GetReceiveNum(chn, TYPE_CAN) > 0) {
+            ZCAN_Receive_Data rx[1] = { 0 };
+            UINT n = ZCAN_Receive(chn, rx, 1, 200);
+            for (UINT i = 0; i < n; i++) {
+                printf("RX ID=0x%X [%d] ", GET_ID(rx[i].frame.can_id), rx[i].frame.can_dlc);
+                for (int j = 0; j < rx[i].frame.can_dlc; j++) {
+                    printf("%02X ", rx[i].frame.data[j]);
+                }
+                printf("\n");
+                // 匹配本指令的应答：设备 ID 与 FUNC 一致
+                if (rx[i].frame.can_dlc >= 4 &&
+                    rx[i].frame.data[1] == ENC_ID && rx[i].frame.data[2] == func) {
+                    return rx[i].frame.data[3];        // 应答状态：0=成功
+                }
+            }
+        }
+        Sleep(5);
+    }
+    printf("指令 0x%02X 无应答（超时）。检查接线/120Ω终端电阻/波特率/编码器实际ID\n", func);
+    return -1;
+}
+
+//-----------------------------------------------------------------------------
+// 轮询读取编码器值（指令 0x01），应答帧 data[3..6] 为 32 位值（低字节在前）
+// 返回 0=读取成功，-1=失败
+//-----------------------------------------------------------------------------
+int Read_Encoder_Value(CHANNEL_HANDLE chn, DWORD timeout)
+{
+    BYTE dummy = 0;
+    ZCAN_Transmit_Data tx;
+    Build_Encoder_Frame(tx, 0x01, &dummy, 1);
+    if (ZCAN_Transmit(chn, &tx, 1) != 1) {
+        printf("发送读取指令失败\n");
+        return -1;
+    }
+
+    DWORD t0 = GetTickCount();
+    while (GetTickCount() - t0 < timeout) {
+        if (ZCAN_GetReceiveNum(chn, TYPE_CAN) > 0) {
+            ZCAN_Receive_Data rx[1] = { 0 };
+            UINT n = ZCAN_Receive(chn, rx, 1, 200);
+            for (UINT i = 0; i < n; i++) {
+                if (rx[i].frame.can_dlc >= 7 &&
+                    rx[i].frame.data[1] == ENC_ID && rx[i].frame.data[2] == 0x01) {
+                    UINT val = (UINT)rx[i].frame.data[3]
+                             | ((UINT)rx[i].frame.data[4] << 8)
+                             | ((UINT)rx[i].frame.data[5] << 16)
+                             | ((UINT)rx[i].frame.data[6] << 24);
+                    printf("编码器值 = %u (0x%08X)\n", val, val);
+                    return 0;
+                }
+                // 非本指令应答也原样打印，便于观察
+                printf("RX ID=0x%X [%d] ", GET_ID(rx[i].frame.can_id), rx[i].frame.can_dlc);
+                for (int j = 0; j < rx[i].frame.can_dlc; j++) {
+                    printf("%02X ", rx[i].frame.data[j]);
+                }
+                printf("\n");
+            }
+        }
+        Sleep(5);
+    }
+    printf("读取编码器值超时\n");
+    return -1;
+}
 
 int main(void)
 {
@@ -114,30 +195,38 @@ int main(void)
         return 1;
     }
 
-    // 初始化两个通道：通道0 发送，通道1 接收
-    CHANNEL_HANDLE chTx = Init_Channel(dev, 0);
-    CHANNEL_HANDLE chRx = Init_Channel(dev, 1);
-    if (chTx == INVALID_CHANNEL_HANDLE || chRx == INVALID_CHANNEL_HANDLE) {
+    // 只初始化通道1：编码器接在通道1，同一通道收发
+    CHANNEL_HANDLE chn = Init_Channel(dev, 1);
+    if (chn == INVALID_CHANNEL_HANDLE) {
         ZCAN_CloseDevice(dev);
         return 1;
     }
 
-    // 发循环：每 10ms 构造并发送一帧，同时轮询接收
-    printf("通道0 发送 -> 通道1 接收，按任意键停止\n");
-    int seq = 0;
-    while (!_kbhit()) {
-        ZCAN_Transmit_Data tx;
-        Construct_CAN_Frame(tx, 0x123, seq);    // 构造帧
-        Send_Frame(chTx, &tx);                  // 发送
-        Receive_And_Print(chRx);                // 接收并打印
+    printf("=== 布瑞特多圈编码器控制 ===\n");
+    printf("通道1 @ %s bps，编码器 ID = %d\n\n", ENC_BAUD, ENC_ID);
 
-        seq++;
-        Sleep(1000);
+    // 1) 配置编码器 ID（保持/复位为 ENC_ID，指令 0x02）
+    BYTE id = (BYTE)ENC_ID;
+    int st = Send_And_Wait_Resp(chn, 0x02, &id, 1, 1000);
+    printf("设置编码器 ID = %d: %s\n\n", ENC_ID,
+           st == 0 ? "成功" : (st < 0 ? "无应答" : "失败"));
+
+    // 2) 设置当前位置为零点（指令 0x06）
+    //    注意：请在启动本程序前，先把编码器轴转到目标零点位置！
+    printf("【提示】请确认编码器轴已处于目标零点位置，即将把当前位置设为 0\n");
+    BYTE zero = 0;
+    st = Send_And_Wait_Resp(chn, 0x06, &zero, 1, 1000);
+    printf("设置零点(当前位置置0): %s\n\n", st == 0 ? "成功" : (st < 0 ? "无应答" : "失败"));
+
+    // 3) 循环轮询读取编码器值（指令 0x01），按任意键退出
+    printf("开始轮询读取编码器值（每 500ms 一次），按任意键退出...\n");
+    while (!_kbhit()) {
+        Read_Encoder_Value(chn, 500);
+        Sleep(500);
     }
 
-    // 收尾：复位两个通道，关闭设备
-    ZCAN_ResetCAN(chTx);
-    ZCAN_ResetCAN(chRx);
+    // 收尾
+    ZCAN_ResetCAN(chn);
     ZCAN_CloseDevice(dev);
     return 0;
 }
