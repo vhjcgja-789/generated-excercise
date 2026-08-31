@@ -1,20 +1,3 @@
-//=============================================================================
-// main.cpp  ——  USBCAN-II 编码器控制（布瑞特多圈 CAN 编码器）
-// 硬件连接：编码器 CAN_H/CAN_L 接 USBCAN-II 通道1（CAN1），总线需 120Ω 终端电阻
-// 接口调用顺序：OpenDevice -> Init_Channel(通道1, 500kbps)
-//               -> 设置ID(0x02) -> 设置零点(0x06)
-//               -> 循环(读编码器值 0x01 -> 打印) -> ResetCAN -> CloseDevice
-//
-// 协议（编码器 CAN 协议指南 V2.01，标准数据帧）：
-//   标识符 ID = 编码器节点地址（默认 1）
-//   数据域   = [LEN][设备ID][指令FUNC][数据DATA(低字节在前)]，LEN=2+DATA字节数
-//   0x02 设置ID    : 发 [0x04][id][0x02][新ID]       -> 收 [0x04][id][0x02][状态]
-//   0x06 设零点    : 发 [0x04][id][0x06][0x00]       -> 收 [0x04][id][0x06][状态]
-//   0x01 读编码器值: 发 [0x04][id][0x01][0x00]       -> 收 [0x07][id][0x01][v0][v1][v2][v3]
-//   状态 0 = 成功，非 0 = 错误码
-//
-// 运行库：zlgcan.dll + kerneldlls 与 exe 同目录；工程链接 zlgcan_x64.lib
-//=============================================================================
 #include <windows.h>
 #include <conio.h>
 #include <stdio.h>
@@ -22,17 +5,11 @@
 
 #include "zlgcan.h"
 
-//-----------------------------------------------------------------------------
-// 编码器配置（如需修改编码器 ID / 波特率，只改这里即可）
-//-----------------------------------------------------------------------------
+
 #define ENC_ID    1                // 编码器节点地址（标识符 ID），默认 1，范围 1~255
 #define ENC_BAUD  "500000"         // CAN 波特率（编码器出厂默认 500kbps）
 
-//-----------------------------------------------------------------------------
-// 构造一帧编码器指令：
-//   ID = ENC_ID，数据域 = [LEN][ENC_ID][func][payload...]，LEN = 2 + plen
-//   payload 多字节时低字节在前
-//-----------------------------------------------------------------------------
+
 void Build_Encoder_Frame(ZCAN_Transmit_Data& tx, BYTE func, const BYTE* payload, int plen)
 {
     memset(&tx, 0, sizeof(tx));
@@ -48,9 +25,6 @@ void Build_Encoder_Frame(ZCAN_Transmit_Data& tx, BYTE func, const BYTE* payload,
     }
 }
 
-//-----------------------------------------------------------------------------
-// 初始化通道：设波特率 -> InitCAN（正常模式，全收）-> StartCAN
-//-----------------------------------------------------------------------------
 CHANNEL_HANDLE Init_Channel(DEVICE_HANDLE dev, int chn_idx)
 {
     char path[24] = { 0 };
@@ -78,9 +52,7 @@ CHANNEL_HANDLE Init_Channel(DEVICE_HANDLE dev, int chn_idx)
     return chn;
 }
 
-//-----------------------------------------------------------------------------
-// 接收并原样打印所有收到的帧（便于观察总线上的全部报文）
-//-----------------------------------------------------------------------------
+
 void Receive_And_Print(CHANNEL_HANDLE chn)
 {
     if (ZCAN_GetReceiveNum(chn, TYPE_CAN) == 0) {
@@ -195,14 +167,13 @@ int main(void)
         return 1;
     }
 
-    // 只初始化通道1：编码器接在通道1，同一通道收发
+    // 初始化通道1：编码器接在通道1，同一通道收发
     CHANNEL_HANDLE chn = Init_Channel(dev, 1);
     if (chn == INVALID_CHANNEL_HANDLE) {
         ZCAN_CloseDevice(dev);
         return 1;
     }
 
-    printf("=== 布瑞特多圈编码器控制 ===\n");
     printf("通道1 @ %s bps，编码器 ID = %d\n\n", ENC_BAUD, ENC_ID);
 
     // 1) 配置编码器 ID（保持/复位为 ENC_ID，指令 0x02）
@@ -211,21 +182,16 @@ int main(void)
     printf("设置编码器 ID = %d: %s\n\n", ENC_ID,
            st == 0 ? "成功" : (st < 0 ? "无应答" : "失败"));
 
-    // 2) 设置当前位置为零点（指令 0x06）
-    //    注意：请在启动本程序前，先把编码器轴转到目标零点位置！
-    printf("【提示】请确认编码器轴已处于目标零点位置，即将把当前位置设为 0\n");
     BYTE zero = 0;
     st = Send_And_Wait_Resp(chn, 0x06, &zero, 1, 1000);
     printf("设置零点(当前位置置0): %s\n\n", st == 0 ? "成功" : (st < 0 ? "无应答" : "失败"));
 
-    // 3) 循环轮询读取编码器值（指令 0x01），按任意键退出
     printf("开始轮询读取编码器值（每 500ms 一次），按任意键退出...\n");
     while (!_kbhit()) {
         Read_Encoder_Value(chn, 500);
         Sleep(500);
     }
 
-    // 收尾
     ZCAN_ResetCAN(chn);
     ZCAN_CloseDevice(dev);
     return 0;
