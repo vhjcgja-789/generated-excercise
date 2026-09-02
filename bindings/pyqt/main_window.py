@@ -19,6 +19,15 @@ BAUD_ITEMS = [
     (100000, "100K"),
 ]
 
+# 0x03 设置波特率指令的参数是速率编号 0~4，不是 bps 数值（见 encoder_types.h BaudRate）
+SETBAUD_ITEMS = [
+    (0, "500K（出厂默认）"),
+    (1, "1M"),
+    (2, "250K"),
+    (3, "125K"),
+    (4, "100K"),
+]
+
 MODE_ITEMS = [
     (0x00, "查询（推荐）"),
     (0xAA, "自动回传值·标准帧"),
@@ -112,7 +121,7 @@ class MainWindow(QWidget):
         self.spin_setid.setRange(1, 255)
         self.spin_setid.setValue(2)
         self.combo_setbaud = QComboBox()
-        for value, text in BAUD_ITEMS:
+        for value, text in SETBAUD_ITEMS:
             self.combo_setbaud.addItem(text, value)
         self.combo_setmode = QComboBox()
         for value, text in MODE_ITEMS:
